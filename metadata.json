@@ -1,0 +1,6 @@
+{
+  "name": "NeuroPulse | EEG-BCI Analyzer",
+  "description": "Real-time EEG-based brain-computer interface system for paralysis patients featuring patient-specific bio-signals, doctor prescriptions, historical session logs, clinical appointments, and an administrative management portal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered patient, caregiver or clinician profile in the NeuroPulse system",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["patient", "caregiver", "clinician", "family", "admin"] },
+        "phone": { "type": "string", "maxLength": 30 },
+        "patientReferenceId": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt"]
+    },
+    "AppointmentBooking": {
+      "title": "AppointmentBooking",
+      "description": "Clinical BCI rehabilitation session and doctor consultation booking record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string", "maxLength": 100 },
+        "patientId": { "type": "string", "maxLength": 50 },
+        "patientName": { "type": "string", "maxLength": 100 },
+        "doctorName": { "type": "string", "maxLength": 100 },
+        "specialty": { "type": "string", "maxLength": 100 },
+        "appointmentDate": { "type": "string", "maxLength": 20 },
+        "appointmentTime": { "type": "string", "maxLength": 20 },
+        "sessionType": { "type": "string", "maxLength": 100 },
+        "contactPhone": { "type": "string", "maxLength": 30 },
+        "clinicalNotes": { "type": "string", "maxLength": 500 },
+        "urgency": { "type": "string", "enum": ["routine", "priority", "urgent"] },
+        "status": { "type": "string", "enum": ["confirmed", "pending", "completed", "cancelled"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "userId",
+        "userEmail",
+        "userName",
+        "patientId",
+        "patientName",
+        "doctorName",
+        "appointmentDate",
+        "appointmentTime",
+        "sessionType",
+        "status",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile data linked to authentication UID"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "AppointmentBooking",
+      "description": "Booked BCI therapy sessions and doctor appointment records"
+    }
+  }
+}

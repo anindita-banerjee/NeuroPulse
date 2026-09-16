@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'aninditabanerjee0023@gmail.com' ||
+        request.auth.token.admin == true
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Connection test document
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // User profile documents: only owner can read or write their own user profile, admin can read
+    match /users/{userId} {
+      allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow list: if isAdmin();
+      allow create: if (isOwner(userId) || isAdmin()) && isValidId(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email is string
+        && request.resource.data.displayName is string;
+      allow update: if (isOwner(userId) || isAdmin()) && isValidId(userId)
+        && request.resource.data.uid == resource.data.uid;
+      allow delete: if isAdmin();
+    }
+
+    // Appointment bookings: users can read their own bookings, admin can read all and manage all
+    match /bookings/{bookingId} {
+      allow get: if isSignedIn() && isValidId(bookingId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(bookingId)
+        && (request.resource.data.userId == request.auth.uid || isAdmin())
+        && request.resource.data.userEmail is string
+        && request.resource.data.patientName is string
+        && request.resource.data.doctorName is string
+        && request.resource.data.appointmentDate is string
+        && request.resource.data.appointmentTime is string
+        && request.resource.data.sessionType is string;
+      allow update: if isSignedIn() && isValidId(bookingId)
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isSignedIn() && isValidId(bookingId)
+        && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+  }
+}
