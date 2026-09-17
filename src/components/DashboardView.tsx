@@ -18,10 +18,13 @@ import {
   ArrowUpRight,
   FilePlus,
   Play,
-  Pause
+  Pause,
+  Download
 } from 'lucide-react';
 import { Patient, EEGPacket, EEGChannelData } from '../types';
 import { NavTab } from './Sidebar';
+import { EEGSvgExportModal } from './EEGSvgExportModal';
+import { downloadEEGSvgReport } from '../utils/eegSvgExport';
 
 interface DashboardViewProps {
   patient: Patient;
@@ -45,16 +48,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [selectedChannelIdx, setSelectedChannelIdx] = useState<number>(4); // default C3 (Motor cortex)
   const [isFiltered, setIsFiltered] = useState<boolean>(true);
   const [isLiveActive, setIsLiveActive] = useState<boolean>(true);
+  const [showSvgExportModal, setShowSvgExportModal] = useState<boolean>(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const channels: EEGChannelData[] = eegPacket?.channels || [];
-  const currentChannel = channels[selectedChannelIdx] || channels[0] || {
+  const currentChannel: EEGChannelData = channels[selectedChannelIdx] || channels[0] || {
     name: 'C3',
     region: 'Motor Cortex',
+    color: '#38bdf8',
     amplitude: 24,
     waveform: [],
     impedance: 1.8,
-    status: 'optimal',
+    status: 'optimal' as const,
   };
 
   // Continuous live oscilloscope animation
@@ -180,7 +185,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="text-xs text-slate-400">· Room {patient.roomBed}</span>
           </div>
           <h1 className="text-xl font-bold text-white tracking-tight">
-            Good morning, Dr. Chen
+            Good morning
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
             Real-time brain signal monitoring, prescription protocol & rehabilitation telemetry for <span className="text-slate-200 font-medium">{patient.name}</span> ({patient.diagnosis}).
@@ -346,6 +351,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 >
                   {isLiveActive ? <Pause size={13} /> : <Play size={13} />}
                 </button>
+
+                {/* Export SVG Report for Patients */}
+                <button
+                  id="btn-export-eeg-svg"
+                  onClick={() => setShowSvgExportModal(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 transition-colors shadow-sm cursor-pointer"
+                  title="Export EEG telemetry report in SVG file format for patient device recheck"
+                >
+                  <Download size={13} className="text-blue-400" />
+                  <span>Export SVG</span>
+                </button>
               </div>
             </div>
 
@@ -375,12 +391,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 className="w-full h-56 block cursor-crosshair"
               />
 
-              <div className="absolute bottom-2 left-3 z-10 flex items-center gap-2 text-[10px] font-mono text-slate-400">
-                <span>Notch: 50 Hz ON</span>
-                <span>·</span>
-                <span>Bandpass: 0.5–40 Hz</span>
-                <span>·</span>
-                <span className="text-emerald-400">Receiving telemetry</span>
+              <div className="absolute bottom-2 left-3 right-3 z-10 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span>Notch: 50 Hz ON</span>
+                  <span>·</span>
+                  <span>Bandpass: 0.5–40 Hz</span>
+                  <span>·</span>
+                  <span className="text-emerald-400">Receiving telemetry</span>
+                </div>
+                <button
+                  id="btn-quick-svg-download"
+                  onClick={() => downloadEEGSvgReport({ patient, channel: currentChannel, eegPacket, isFiltered })}
+                  className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900/90 text-blue-300 hover:text-white border border-slate-700 hover:border-blue-500 transition-colors cursor-pointer"
+                  title="Direct download EEG report as standalone .svg vector graphic"
+                >
+                  <Download size={10} className="text-blue-400" />
+                  <span>Quick Download .SVG</span>
+                </button>
               </div>
             </div>
           </div>
@@ -697,6 +724,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <ChevronDown size={14} />
         </button>
       </div>
+
+      {/* EEG SVG Export Modal for Patient Device Recheck */}
+      <EEGSvgExportModal
+        isOpen={showSvgExportModal}
+        onClose={() => setShowSvgExportModal(false)}
+        patient={patient}
+        channel={currentChannel}
+        eegPacket={eegPacket}
+        isFiltered={isFiltered}
+      />
     </div>
   );
 };

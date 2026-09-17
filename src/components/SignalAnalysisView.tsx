@@ -8,9 +8,11 @@ import {
   Cpu,
   Layers,
   Sparkles,
-  Info
+  Info,
+  Download
 } from 'lucide-react';
 import { Patient, EEGPacket, EEGChannelData } from '../types';
+import { EEGSvgExportModal } from './EEGSvgExportModal';
 
 interface SignalAnalysisViewProps {
   patient: Patient;
@@ -26,6 +28,7 @@ export const SignalAnalysisView: React.FC<SignalAnalysisViewProps> = ({
   const [timebase, setTimebase] = useState<string>('5s');
   const [notchFilter, setNotchFilter] = useState<boolean>(true);
   const [bandpass, setBandpass] = useState<string>('0.5-40Hz');
+  const [showSvgModal, setShowSvgModal] = useState<boolean>(false);
 
   const channels: EEGChannelData[] = eegPacket?.channels || [];
 
@@ -231,6 +234,16 @@ export const SignalAnalysisView: React.FC<SignalAnalysisViewProps> = ({
                     ? 'Occipital visual cortex site for SSVEP frequency lock.'
                     : 'Frontal cognitive load & baseline reference channel.'}
                 </div>
+
+                <div className="mt-3 pt-2 border-t border-slate-800">
+                  <button
+                    onClick={() => setShowSvgModal(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 transition-colors shadow-sm cursor-pointer"
+                  >
+                    <Download size={14} className="text-blue-400" />
+                    <span>Export {activeChannel.name} Report (.SVG)</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -320,6 +333,17 @@ export const SignalAnalysisView: React.FC<SignalAnalysisViewProps> = ({
           </div>
         </div>
       </div>
+
+      {activeChannel && (
+        <EEGSvgExportModal
+          isOpen={showSvgModal}
+          onClose={() => setShowSvgModal(false)}
+          patient={patient}
+          channel={activeChannel}
+          eegPacket={eegPacket}
+          isFiltered={notchFilter}
+        />
+      )}
     </div>
   );
 };
