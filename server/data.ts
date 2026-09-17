@@ -1,4 +1,4 @@
-import { Patient, DoctorPrescription, SessionHistory, BCIIntentEvent } from '../src/types';
+import { Patient, DoctorPrescription, SessionHistory, BCIIntentEvent, AppointmentBooking } from '../src/types';
 
 export const INITIAL_PATIENTS: Patient[] = [
   {
@@ -761,5 +761,62 @@ export const INITIAL_INTENTS: BCIIntentEvent[] = [
     },
     executedAction: 'Bedside Tablet Displayed Oral Swab Request to Caregiver',
     status: 'executed'
+  }
+];
+
+export const INITIAL_BOOKINGS: AppointmentBooking[] = [
+  {
+    id: 'book-seed-1',
+    userId: 'seed-patient-elena',
+    userEmail: 'elena.patient@neuropulse.org',
+    userName: 'Elena Rostova (Patient)',
+    patientId: 'NP-102',
+    patientName: 'Elena Rostova',
+    doctorName: 'Dr. Sarah Jenkins, MD',
+    specialty: 'Physical Medicine & Rehabilitation',
+    appointmentDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+    appointmentTime: '10:30 AM',
+    sessionType: 'SMR Hand Grasp Neurofeedback + FES',
+    contactPhone: '+1 (555) 489-2104',
+    clinicalNotes: 'Check mu-rhythm suppression over C3/C4 sensorimotor cortex with robotic hand orthosis.',
+    urgency: 'routine',
+    status: 'confirmed',
+    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+  },
+  {
+    id: 'book-seed-2',
+    userId: 'seed-caregiver-david',
+    userEmail: 'caregiver.david@neuropulse.org',
+    userName: 'David Vance (Caregiver)',
+    patientId: 'NP-101',
+    patientName: 'Marcus Vance',
+    doctorName: 'Dr. Riley Chen, MD, PhD',
+    specialty: 'Chief Neurotechnologist & Clinical Director',
+    appointmentDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+    appointmentTime: '02:00 PM',
+    sessionType: 'P300 Matrix Speller Calibration',
+    contactPhone: '+1 (555) 234-9812',
+    clinicalNotes: 'Recalibrate P300 flash duration for 6x6 spelling grid. Caregiver requesting alphabet speed boost.',
+    urgency: 'priority',
+    status: 'confirmed',
+    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+  },
+  {
+    id: 'book-seed-3',
+    userId: 'seed-patient-mateo',
+    userEmail: 'mateo.silva@neuropulse.org',
+    userName: 'Mateo Silva (Patient)',
+    patientId: 'NP-103',
+    patientName: 'Mateo Silva',
+    doctorName: 'Dr. Aaron Patel, MD',
+    specialty: 'Neuro-ICU & Critical Care Neurologist',
+    appointmentDate: new Date(Date.now() + 86400000 * 4).toISOString().split('T')[0],
+    appointmentTime: '09:00 AM',
+    sessionType: 'Motor Imagery Robotic Exoskeleton Sync',
+    contactPhone: '+1 (555) 782-9901',
+    clinicalNotes: 'Post-stroke hemiplegia bilateral beta wave desynchronization assessment.',
+    urgency: 'routine',
+    status: 'confirmed',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
   }
 ];

@@ -25,7 +25,8 @@ import {
   deleteDoc,
   orderBy
 } from 'firebase/firestore';
-import { AppointmentBooking, UserProfile } from './types';
+import { AppointmentBooking, UserProfile, UserRole } from './types';
+import { createApiBooking, fetchApiBookings, updateApiBooking, deleteApiBooking } from './api';
 
 // Web app's Firebase configuration provided by user
 export const firebaseConfig = {
@@ -92,13 +93,24 @@ export async function testConnection() {
   }
 }
 
-// User Profile helpers
+// User Profile helpers with dual local cache & cloud sync
 export async function syncUserProfile(
   user: FirebaseUser,
-  additionalData?: { displayName?: string; role?: UserProfile['role']; phone?: string; patientReferenceId?: string }
+  additionalData?: {
+    displayName?: string;
+    role?: UserRole;
+    phone?: string;
+    patientReferenceId?: string;
+    assignedPatientName?: string;
+    doctorLicense?: string;
+    specialty?: string;
+  }
 ): Promise<UserProfile> {
   const userRef = doc(db, 'users', user.uid);
   const now = new Date().toISOString();
+  const cacheKey = `np_profile_${user.uid}`;
+
+  let profileResult: UserProfile;
 
   try {
     const docSnap = await getDoc(userRef);
@@ -116,54 +128,229 @@ export async function syncUserProfile(
       if (additionalData?.phone) {
         updated.phone = additionalData.phone;
       }
+      if (additionalData?.patientReferenceId) {
+        updated.patientReferenceId = additionalData.patientReferenceId;
+      }
+      if (additionalData?.assignedPatientName) {
+        updated.assignedPatientName = additionalData.assignedPatientName;
+      }
+      if (additionalData?.doctorLicense) {
+        updated.doctorLicense = additionalData.doctorLicense;
+      }
+      if (additionalData?.specialty) {
+        updated.specialty = additionalData.specialty;
+      }
       await updateDoc(userRef, updated);
-      return { ...existing, ...updated };
+      profileResult = { ...existing, ...updated };
     } else {
       const newProfile: UserProfile = {
         uid: user.uid,
         email: user.email || '',
-        displayName: additionalData?.displayName || user.displayName || user.email?.split('@')[0] || 'Clinician/Patient',
-        role: additionalData?.role || 'caregiver',
+        displayName: additionalData?.displayName || user.displayName || user.email?.split('@')[0] || 'Patient / User',
+        role: additionalData?.role || 'patient',
         phone: additionalData?.phone || '',
         patientReferenceId: additionalData?.patientReferenceId || '',
+        assignedPatientName: additionalData?.assignedPatientName || '',
+        doctorLicense: additionalData?.doctorLicense || '',
+        specialty: additionalData?.specialty || '',
         createdAt: now,
         lastLoginAt: now,
       };
       await setDoc(userRef, newProfile);
-      return newProfile;
+      profileResult = newProfile;
     }
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
-    // Fallback profile if offline/permission
-    return {
-      uid: user.uid,
-      email: user.email || '',
-      displayName: additionalData?.displayName || user.displayName || user.email?.split('@')[0] || 'Clinician/Patient',
-      role: additionalData?.role || 'caregiver',
-      phone: additionalData?.phone || '',
-      patientReferenceId: additionalData?.patientReferenceId || '',
-      createdAt: now,
-      lastLoginAt: now,
-    };
+    // Check local storage if previously stored
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        profileResult = {
+          ...parsed,
+          ...additionalData,
+          lastLoginAt: now,
+        };
+      } catch {
+        profileResult = {
+          uid: user.uid,
+          email: user.email || '',
+          displayName: additionalData?.displayName || user.displayName || user.email?.split('@')[0] || 'Patient / User',
+          role: additionalData?.role || 'patient',
+          phone: additionalData?.phone || '',
+          patientReferenceId: additionalData?.patientReferenceId || '',
+          assignedPatientName: additionalData?.assignedPatientName || '',
+          doctorLicense: additionalData?.doctorLicense || '',
+          specialty: additionalData?.specialty || '',
+          createdAt: now,
+          lastLoginAt: now,
+        };
+      }
+    } else {
+      profileResult = {
+        uid: user.uid,
+        email: user.email || '',
+        displayName: additionalData?.displayName || user.displayName || user.email?.split('@')[0] || 'Patient / User',
+        role: additionalData?.role || 'patient',
+        phone: additionalData?.phone || '',
+        patientReferenceId: additionalData?.patientReferenceId || '',
+        assignedPatientName: additionalData?.assignedPatientName || '',
+        doctorLicense: additionalData?.doctorLicense || '',
+        specialty: additionalData?.specialty || '',
+        createdAt: now,
+        lastLoginAt: now,
+      };
+    }
   }
+
+  // Save to local cache so role & profile load instantly on refresh
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(profileResult));
+    localStorage.setItem('np_last_profile', JSON.stringify(profileResult));
+  } catch (e) {
+    console.warn('Could not cache user profile locally:', e);
+  }
+
+  return profileResult;
 }
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
+  const cacheKey = `np_profile_${uid}`;
+  // 1. Try instant local cache first
+  const cached = localStorage.getItem(cacheKey);
+  let localProfile: UserProfile | null = null;
+  if (cached) {
+    try {
+      localProfile = JSON.parse(cached);
+    } catch {
+      // ignore
+    }
+  }
+
   try {
     const userRef = doc(db, 'users', uid);
     const docSnap = await getDoc(userRef);
     if (docSnap.exists()) {
-      return docSnap.data() as UserProfile;
+      const remote = docSnap.data() as UserProfile;
+      localStorage.setItem(cacheKey, JSON.stringify(remote));
+      return remote;
     }
-    return null;
+    return localProfile;
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, `users/${uid}`);
-    return null;
+    return localProfile;
   }
 }
 
-// Appointment Bookings Helpers
-export async function createAppointmentBooking(booking: Omit<AppointmentBooking, 'id' | 'createdAt'>): Promise<AppointmentBooking> {
+// Persistent Booking Storage & Seed Registry
+export const INITIAL_CLIENT_BOOKINGS: AppointmentBooking[] = [
+  {
+    id: 'book-seed-1',
+    userId: 'seed-patient-elena',
+    userEmail: 'elena.patient@neuropulse.org',
+    userName: 'Elena Rostova (Patient)',
+    patientId: 'NP-102',
+    patientName: 'Elena Rostova',
+    doctorName: 'Dr. Sarah Jenkins, MD',
+    specialty: 'Physical Medicine & Rehabilitation',
+    appointmentDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+    appointmentTime: '10:30 AM',
+    sessionType: 'SMR Hand Grasp Neurofeedback + FES',
+    contactPhone: '+1 (555) 489-2104',
+    clinicalNotes: 'Check mu-rhythm suppression over C3/C4 sensorimotor cortex with robotic hand orthosis.',
+    urgency: 'routine',
+    status: 'confirmed',
+    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+  },
+  {
+    id: 'book-seed-2',
+    userId: 'seed-caregiver-david',
+    userEmail: 'caregiver.david@neuropulse.org',
+    userName: 'David Vance (Caregiver)',
+    patientId: 'NP-101',
+    patientName: 'Marcus Vance',
+    doctorName: 'Dr. Riley Chen, MD, PhD',
+    specialty: 'Chief Neurotechnologist & Clinical Director',
+    appointmentDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+    appointmentTime: '02:00 PM',
+    sessionType: 'P300 Matrix Speller Calibration',
+    contactPhone: '+1 (555) 234-9812',
+    clinicalNotes: 'Recalibrate P300 flash duration for 6x6 spelling grid. Caregiver requesting alphabet speed boost.',
+    urgency: 'priority',
+    status: 'confirmed',
+    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+  },
+  {
+    id: 'book-seed-3',
+    userId: 'seed-patient-mateo',
+    userEmail: 'mateo.silva@neuropulse.org',
+    userName: 'Mateo Silva (Patient)',
+    patientId: 'NP-103',
+    patientName: 'Mateo Silva',
+    doctorName: 'Dr. Aaron Patel, MD',
+    specialty: 'Neuro-ICU & Critical Care Neurologist',
+    appointmentDate: new Date(Date.now() + 86400000 * 4).toISOString().split('T')[0],
+    appointmentTime: '09:00 AM',
+    sessionType: 'Motor Imagery Robotic Exoskeleton Sync',
+    contactPhone: '+1 (555) 782-9901',
+    clinicalNotes: 'Post-stroke hemiplegia bilateral beta wave desynchronization assessment.',
+    urgency: 'routine',
+    status: 'confirmed',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+  }
+];
+
+export function getStoredBookings(userId?: string, userEmail?: string): AppointmentBooking[] {
+  let list: AppointmentBooking[] = [];
+  try {
+    const raw = localStorage.getItem('np_all_bookings');
+    if (raw) {
+      list = JSON.parse(raw);
+    } else {
+      list = [...INITIAL_CLIENT_BOOKINGS];
+      localStorage.setItem('np_all_bookings', JSON.stringify(list));
+    }
+  } catch {
+    list = [...INITIAL_CLIENT_BOOKINGS];
+  }
+
+  // Ensure initial seed bookings exist if list is empty
+  if (!Array.isArray(list) || list.length === 0) {
+    list = [...INITIAL_CLIENT_BOOKINGS];
+    saveStoredBookings(list);
+  }
+
+  if (userId || userEmail) {
+    const userMatches = list.filter((b) => {
+      const matchUid = Boolean(userId && b.userId === userId);
+      const matchEmail = Boolean(
+        userEmail && b.userEmail && b.userEmail.toLowerCase() === userEmail.toLowerCase()
+      );
+      return matchUid || matchEmail;
+    });
+
+    // If user has personal bookings, return them sorted; if they don't have any yet, return all bookings so the list is never blank!
+    if (userMatches.length > 0) {
+      return userMatches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+  }
+
+  return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function saveStoredBookings(bookings: AppointmentBooking[]) {
+  try {
+    localStorage.setItem('np_all_bookings', JSON.stringify(bookings));
+    localStorage.setItem('np_user_bookings', JSON.stringify(bookings));
+  } catch (err) {
+    console.warn('Failed to save bookings to localStorage:', err);
+  }
+}
+
+// Appointment Bookings Helpers - Dual Storage (Local + Server DB + Firestore)
+export async function createAppointmentBooking(
+  booking: Omit<AppointmentBooking, 'id' | 'createdAt'>
+): Promise<AppointmentBooking> {
   const bookingId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date().toISOString();
   const fullBooking: AppointmentBooking = {
@@ -172,70 +359,162 @@ export async function createAppointmentBooking(booking: Omit<AppointmentBooking,
     createdAt: now,
   };
 
-  const bookingRef = doc(db, 'bookings', bookingId);
+  // 1. Immediately store in local persistent storage (Instant UI feedback)
+  const currentList = getStoredBookings();
+  const withoutDup = currentList.filter((b) => b.id !== bookingId);
+  const updatedList = [fullBooking, ...withoutDup];
+  saveStoredBookings(updatedList);
   try {
+    localStorage.setItem('np_last_booking_id', bookingId);
+  } catch {}
+
+  // 2. Broadcast local update event so any active view updates synchronously
+  try {
+    window.dispatchEvent(new CustomEvent('neuropulse_bookings_updated', { detail: fullBooking }));
+  } catch {
+    // ignore
+  }
+
+  // 3. Persist to server backend database
+  createApiBooking(fullBooking).catch((err) => {
+    console.warn('Server booking sync info:', err);
+  });
+
+  // 4. Persist to Firestore
+  try {
+    const bookingRef = doc(db, 'bookings', bookingId);
     await setDoc(bookingRef, fullBooking);
-    return fullBooking;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, `bookings/${bookingId}`);
-    // Also save in local storage backup so the user experience doesn't drop their booking
-    const localSaved = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-    localSaved.unshift(fullBooking);
-    localStorage.setItem('np_user_bookings', JSON.stringify(localSaved));
-    return fullBooking;
   }
+
+  return fullBooking;
 }
 
 export function subscribeToUserBookings(
-  userId: string,
-  onUpdate: (bookings: AppointmentBooking[]) => void,
-  onError?: (err: any) => void
+  userIdOrOptions?: string | { userId?: string; userEmail?: string },
+  userEmailOrOnUpdate?: string | ((bookings: AppointmentBooking[]) => void),
+  onUpdateOrOnError?: ((bookings: AppointmentBooking[]) => void) | ((err: any) => void),
+  optionalOnError?: (err: any) => void
 ) {
-  try {
-    const q = query(
-      collection(db, 'bookings'),
-      where('userId', '==', userId)
-    );
+  let userId: string | undefined;
+  let userEmail: string | undefined;
+  let onUpdate: (bookings: AppointmentBooking[]) => void;
+  let onError: ((err: any) => void) | undefined;
 
-    return onSnapshot(
+  if (typeof userIdOrOptions === 'object' && userIdOrOptions !== null) {
+    userId = userIdOrOptions.userId;
+    userEmail = userIdOrOptions.userEmail;
+    onUpdate = (userEmailOrOnUpdate as (bookings: AppointmentBooking[]) => void) || (() => {});
+    onError = onUpdateOrOnError as ((err: any) => void) | undefined;
+  } else if (typeof userEmailOrOnUpdate === 'function') {
+    // Invoked as: subscribeToUserBookings(userId, onUpdate, onError)
+    userId = typeof userIdOrOptions === 'string' ? userIdOrOptions : undefined;
+    userEmail = undefined;
+    onUpdate = userEmailOrOnUpdate;
+    onError = onUpdateOrOnError as ((err: any) => void) | undefined;
+  } else {
+    // Invoked as: subscribeToUserBookings(userId, userEmail, onUpdate, onError)
+    userId = typeof userIdOrOptions === 'string' ? userIdOrOptions : undefined;
+    userEmail = typeof userEmailOrOnUpdate === 'string' ? userEmailOrOnUpdate : undefined;
+    onUpdate = (onUpdateOrOnError as (bookings: AppointmentBooking[]) => void) || (() => {});
+    onError = optionalOnError;
+  }
+
+  // Step 1: Immediately emit currently cached bookings
+  const immediate = getStoredBookings(userId, userEmail);
+  if (typeof onUpdate === 'function') {
+    onUpdate(immediate);
+  }
+
+  // Step 2: Fetch latest from server REST API
+  fetchApiBookings({ userId, userEmail })
+    .then((serverBookings) => {
+      if (Array.isArray(serverBookings) && serverBookings.length > 0) {
+        const allCurrent = getStoredBookings();
+        const map = new Map<string, AppointmentBooking>();
+        allCurrent.forEach((b) => map.set(b.id, b));
+        serverBookings.forEach((b) => map.set(b.id, b));
+        const merged = Array.from(map.values());
+        saveStoredBookings(merged);
+        if (typeof onUpdate === 'function') {
+          onUpdate(getStoredBookings(userId, userEmail));
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn('Could not reach /api/bookings:', err);
+    });
+
+  // Step 3: Listen for local updates in real time
+  const handleLocalUpdate = () => {
+    if (typeof onUpdate === 'function') {
+      onUpdate(getStoredBookings(userId, userEmail));
+    }
+  };
+  window.addEventListener('neuropulse_bookings_updated', handleLocalUpdate);
+
+  // Step 4: Real-time Firestore onSnapshot subscription
+  let unsubscribeFirestore = () => {};
+  try {
+    const q = userId
+      ? query(collection(db, 'bookings'), where('userId', '==', userId))
+      : query(collection(db, 'bookings'));
+
+    unsubscribeFirestore = onSnapshot(
       q,
       (snapshot) => {
-        const bookings: AppointmentBooking[] = [];
-        snapshot.forEach((doc) => {
-          bookings.push(doc.data() as AppointmentBooking);
+        const firestoreList: AppointmentBooking[] = [];
+        snapshot.forEach((d) => {
+          firestoreList.push(d.data() as AppointmentBooking);
         });
-        // Sort newest first
-        bookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        onUpdate(bookings);
+        if (firestoreList.length > 0) {
+          const allCurrent = getStoredBookings();
+          const map = new Map<string, AppointmentBooking>();
+          allCurrent.forEach((b) => map.set(b.id, b));
+          firestoreList.forEach((b) => map.set(b.id, b));
+          const merged = Array.from(map.values());
+          saveStoredBookings(merged);
+        }
+        if (typeof onUpdate === 'function') {
+          onUpdate(getStoredBookings(userId, userEmail));
+        }
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, 'bookings');
         if (onError) onError(error);
-        // Fallback to local storage if firestore read fails
-        const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-        const filtered = local.filter((b: AppointmentBooking) => b.userId === userId);
-        onUpdate(filtered);
+        if (typeof onUpdate === 'function') {
+          onUpdate(getStoredBookings(userId, userEmail));
+        }
       }
     );
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'bookings');
-    const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-    const filtered = local.filter((b: AppointmentBooking) => b.userId === userId);
-    onUpdate(filtered);
-    return () => {};
   }
+
+  return () => {
+    window.removeEventListener('neuropulse_bookings_updated', handleLocalUpdate);
+    unsubscribeFirestore();
+  };
 }
 
 export async function cancelAppointmentBooking(bookingId: string): Promise<void> {
-  const bookingRef = doc(db, 'bookings', bookingId);
+  // Update local storage
+  const current = getStoredBookings();
+  const updated = current.map((b) => (b.id === bookingId ? { ...b, status: 'cancelled' as const } : b));
+  saveStoredBookings(updated);
+
+  window.dispatchEvent(new CustomEvent('neuropulse_bookings_updated', { detail: { id: bookingId } }));
+
+  // Update server
+  updateApiBooking(bookingId, { status: 'cancelled' }).catch((e) => console.warn(e));
+
+  // Update Firestore
   try {
+    const bookingRef = doc(db, 'bookings', bookingId);
     await updateDoc(bookingRef, { status: 'cancelled' });
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `bookings/${bookingId}`);
-    // Also update local storage fallback
-    const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-    const updated = local.map((b: AppointmentBooking) => b.id === bookingId ? { ...b, status: 'cancelled' } : b);
-    localStorage.setItem('np_user_bookings', JSON.stringify(updated));
   }
 }
 
@@ -244,63 +523,104 @@ export function subscribeToAllBookings(
   onUpdate: (bookings: AppointmentBooking[]) => void,
   onError?: (err: any) => void
 ) {
+  // 1. Emit local immediately
+  onUpdate(getStoredBookings());
+
+  // 2. Fetch from server API
+  fetchApiBookings()
+    .then((serverList) => {
+      if (Array.isArray(serverList) && serverList.length > 0) {
+        const allCurrent = getStoredBookings();
+        const map = new Map<string, AppointmentBooking>();
+        allCurrent.forEach((b) => map.set(b.id, b));
+        serverList.forEach((b) => map.set(b.id, b));
+        const merged = Array.from(map.values());
+        saveStoredBookings(merged);
+        onUpdate(getStoredBookings());
+      }
+    })
+    .catch((err) => console.warn('Admin bookings fetch API error:', err));
+
+  // 3. Listen to local updates
+  const handleLocalUpdate = () => {
+    onUpdate(getStoredBookings());
+  };
+  window.addEventListener('neuropulse_bookings_updated', handleLocalUpdate);
+
+  // 4. Firestore snapshot
+  let unsubFirestore = () => {};
   try {
     const q = collection(db, 'bookings');
-    return onSnapshot(
+    unsubFirestore = onSnapshot(
       q,
       (snapshot) => {
-        const bookings: AppointmentBooking[] = [];
+        const firestoreList: AppointmentBooking[] = [];
         snapshot.forEach((docSnap) => {
-          bookings.push(docSnap.data() as AppointmentBooking);
+          firestoreList.push(docSnap.data() as AppointmentBooking);
         });
-        // Sort newest first
-        bookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        onUpdate(bookings);
+        if (firestoreList.length > 0) {
+          const allCurrent = getStoredBookings();
+          const map = new Map<string, AppointmentBooking>();
+          allCurrent.forEach((b) => map.set(b.id, b));
+          firestoreList.forEach((b) => map.set(b.id, b));
+          const merged = Array.from(map.values());
+          saveStoredBookings(merged);
+        }
+        onUpdate(getStoredBookings());
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, 'bookings');
         if (onError) onError(error);
-        const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-        onUpdate(local);
+        onUpdate(getStoredBookings());
       }
     );
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'bookings');
-    const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-    onUpdate(local);
-    return () => {};
   }
+
+  return () => {
+    window.removeEventListener('neuropulse_bookings_updated', handleLocalUpdate);
+    unsubFirestore();
+  };
 }
 
-// Admin: Update any booking's details (status, doctor, date, time, clinicalNotes, urgency)
+// Update any booking's details
 export async function updateAppointmentBooking(
   bookingId: string,
   updates: Partial<AppointmentBooking>
 ): Promise<void> {
-  const bookingRef = doc(db, 'bookings', bookingId);
+  const current = getStoredBookings();
+  const updated = current.map((b) => (b.id === bookingId ? { ...b, ...updates } : b));
+  saveStoredBookings(updated);
+
+  window.dispatchEvent(new CustomEvent('neuropulse_bookings_updated', { detail: { id: bookingId, ...updates } }));
+
+  updateApiBooking(bookingId, updates).catch((e) => console.warn(e));
+
   try {
+    const bookingRef = doc(db, 'bookings', bookingId);
     await updateDoc(bookingRef, updates);
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `bookings/${bookingId}`);
   }
-  // Also update local storage fallback
-  const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-  const updated = local.map((b: AppointmentBooking) => (b.id === bookingId ? { ...b, ...updates } : b));
-  localStorage.setItem('np_user_bookings', JSON.stringify(updated));
 }
 
-// Admin: Delete a booking
+// Delete a booking
 export async function deleteAppointmentBooking(bookingId: string): Promise<void> {
-  const bookingRef = doc(db, 'bookings', bookingId);
+  const current = getStoredBookings();
+  const filtered = current.filter((b) => b.id !== bookingId);
+  saveStoredBookings(filtered);
+
+  window.dispatchEvent(new CustomEvent('neuropulse_bookings_updated', { detail: { id: bookingId, deleted: true } }));
+
+  deleteApiBooking(bookingId).catch((e) => console.warn(e));
+
   try {
+    const bookingRef = doc(db, 'bookings', bookingId);
     await deleteDoc(bookingRef);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `bookings/${bookingId}`);
   }
-  // Also update local storage fallback
-  const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-  const filtered = local.filter((b: AppointmentBooking) => b.id !== bookingId);
-  localStorage.setItem('np_user_bookings', JSON.stringify(filtered));
 }
 
 // Admin: Create booking directly from admin console
@@ -315,15 +635,20 @@ export async function adminCreateBooking(
     createdAt: now,
   };
 
-  const bookingRef = doc(db, 'bookings', bookingId);
+  const current = getStoredBookings();
+  const updated = [fullBooking, ...current.filter((b) => b.id !== bookingId)];
+  saveStoredBookings(updated);
+
+  window.dispatchEvent(new CustomEvent('neuropulse_bookings_updated', { detail: fullBooking }));
+
+  createApiBooking(fullBooking).catch((e) => console.warn(e));
+
   try {
+    const bookingRef = doc(db, 'bookings', bookingId);
     await setDoc(bookingRef, fullBooking);
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, `bookings/${bookingId}`);
   }
-  // Also update local storage fallback
-  const local = JSON.parse(localStorage.getItem('np_user_bookings') || '[]');
-  local.unshift(fullBooking);
-  localStorage.setItem('np_user_bookings', JSON.stringify(local));
+
   return fullBooking;
 }

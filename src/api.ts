@@ -1,4 +1,4 @@
-import { Patient, DoctorPrescription, SessionHistory, BCIIntentEvent, EEGPacket } from './types';
+import { Patient, DoctorPrescription, SessionHistory, BCIIntentEvent, EEGPacket, AppointmentBooking } from './types';
 
 export async function fetchPatients(): Promise<Patient[]> {
   const res = await fetch('/api/patients');
@@ -101,4 +101,44 @@ export async function fetchAIAssessment(patientId: string): Promise<{
   });
   if (!res.ok) throw new Error('Failed to generate AI assessment');
   return res.json();
+}
+
+// Appointment Bookings API
+export async function fetchApiBookings(params?: { userId?: string; userEmail?: string; patientId?: string }): Promise<AppointmentBooking[]> {
+  const query = new URLSearchParams();
+  if (params?.userId) query.set('userId', params.userId);
+  if (params?.userEmail) query.set('userEmail', params.userEmail);
+  if (params?.patientId) query.set('patientId', params.patientId);
+  const url = query.toString() ? `/api/bookings?${query.toString()}` : '/api/bookings';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch bookings');
+  return res.json();
+}
+
+export async function createApiBooking(booking: AppointmentBooking): Promise<AppointmentBooking> {
+  const res = await fetch('/api/bookings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(booking),
+  });
+  if (!res.ok) throw new Error('Failed to create booking on server');
+  return res.json();
+}
+
+export async function updateApiBooking(id: string, updates: Partial<AppointmentBooking>): Promise<AppointmentBooking> {
+  const res = await fetch(`/api/bookings/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error('Failed to update booking on server');
+  return res.json();
+}
+
+export async function deleteApiBooking(id: string): Promise<boolean> {
+  const res = await fetch(`/api/bookings/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Failed to delete booking on server');
+  return true;
 }

@@ -38,6 +38,7 @@ import {
   subscribeToAllBookings,
   updateAppointmentBooking,
   deleteAppointmentBooking,
+  getStoredBookings,
 } from '../firebase';
 import { AdminNewBookingModal } from './AdminNewBookingModal';
 import { AdminEditBookingModal } from './AdminEditBookingModal';
@@ -63,9 +64,9 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Bookings state
-  const [bookings, setBookings] = useState<AppointmentBooking[]>([]);
-  const [loadingBookings, setLoadingBookings] = useState(true);
+  // Bookings state initialized from cache immediately
+  const [bookings, setBookings] = useState<AppointmentBooking[]>(() => getStoredBookings());
+  const [loadingBookings, setLoadingBookings] = useState(false);
 
   // Filtering & search
   const [searchQuery, setSearchQuery] = useState('');

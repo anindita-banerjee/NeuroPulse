@@ -159,12 +159,28 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
     setIsSubmitting(true);
 
     try {
+      // Determine appropriate patient identity based on user role
+      let computedPatientName = currentPatient?.name || 'Elena Rostova';
+      let computedPatientId = currentPatient?.id || 'NP-102';
+      let computedUserName = userProfile?.displayName || user.displayName || user.email?.split('@')[0] || 'Patient / User';
+
+      if (userProfile?.role === 'patient') {
+        computedPatientName = userProfile.displayName || 'Elena Rostova';
+        computedPatientId = userProfile.patientReferenceId || 'NP-102';
+        computedUserName = `${userProfile.displayName || 'Elena Rostova'} (Patient)`;
+      } else if (userProfile?.role === 'caregiver' || userProfile?.role === 'family') {
+        computedPatientName = userProfile.assignedPatientName || currentPatient?.name || 'Marcus Vance';
+        computedUserName = `${userProfile.displayName || 'David Vance'} (Caregiver)`;
+      } else if (userProfile?.role === 'doctor' || userProfile?.role === 'clinician') {
+        computedUserName = `${userProfile.displayName || 'Dr. Riley Chen'} (Attending Physician)`;
+      }
+
       const newBooking = await createAppointmentBooking({
         userId: user.uid,
         userEmail: user.email || '',
-        userName: userProfile?.displayName || user.displayName || user.email?.split('@')[0] || 'Patient / Caregiver',
-        patientId: currentPatient?.id || 'NP-2401',
-        patientName: currentPatient?.name || 'Assigned Patient',
+        userName: computedUserName,
+        patientId: computedPatientId,
+        patientName: computedPatientName,
         doctorName: currentDoctor.name,
         specialty: currentDoctor.specialty,
         appointmentDate,

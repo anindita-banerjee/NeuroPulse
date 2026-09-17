@@ -163,13 +163,18 @@ export function isAdminEmail(email?: string | null): boolean {
   return email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
+export type UserRole = 'patient' | 'caregiver' | 'doctor' | 'clinician' | 'family' | 'admin';
+
 export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
-  role: 'patient' | 'caregiver' | 'clinician' | 'family' | 'admin';
+  role: UserRole;
   phone?: string;
   patientReferenceId?: string;
+  assignedPatientName?: string;
+  doctorLicense?: string;
+  specialty?: string;
   createdAt: string;
   lastLoginAt?: string;
 }

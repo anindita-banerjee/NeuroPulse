@@ -225,6 +225,77 @@ app.post('/api/patients/:id/intents', (req, res) => {
   }
 });
 
+// 5b. Clinical Appointment Bookings endpoints (Persistent database)
+app.get('/api/bookings', (req, res) => {
+  try {
+    const { userId, userEmail, patientId } = req.query;
+    const bookings = db.getBookings({
+      userId: typeof userId === 'string' ? userId : undefined,
+      userEmail: typeof userEmail === 'string' ? userEmail : undefined,
+      patientId: typeof patientId === 'string' ? patientId : undefined,
+    });
+    res.json(bookings);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to retrieve bookings' });
+  }
+});
+
+app.get('/api/bookings/:id', (req, res) => {
+  try {
+    const booking = db.getBookingById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    res.json(booking);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to retrieve booking' });
+  }
+});
+
+app.post('/api/bookings', (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.appointmentDate || !data.appointmentTime || !data.patientName) {
+      return res.status(400).json({ error: 'Missing required booking fields' });
+    }
+    const bookingId = data.id || `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const fullBooking = {
+      ...data,
+      id: bookingId,
+      createdAt: data.createdAt || new Date().toISOString(),
+      status: data.status || 'confirmed',
+    };
+    const created = db.createBooking(fullBooking);
+    res.status(201).json(created);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create booking' });
+  }
+});
+
+app.put('/api/bookings/:id', (req, res) => {
+  try {
+    const updated = db.updateBooking(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update booking' });
+  }
+});
+
+app.delete('/api/bookings/:id', (req, res) => {
+  try {
+    const success = db.deleteBooking(req.params.id);
+    if (!success) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete booking' });
+  }
+});
+
 // 6. Real-time EEG packet simulation tailored to each patient
 app.get('/api/patients/:id/eeg-live', (req, res) => {
   try {
